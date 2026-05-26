@@ -1292,4 +1292,3 @@ Private Function CoerceLong(ByVal v As Variant, Optional ByVal def As Long = 0) 
 fin:
     CoerceLong = def
 End Function
-

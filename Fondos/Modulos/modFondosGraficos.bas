@@ -763,5 +763,3 @@ NextJUR:
 
 fin:
 End Sub
-
-

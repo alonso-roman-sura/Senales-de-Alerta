@@ -1068,9 +1068,11 @@ Public Sub CrearQuerySAB_CM(ByVal rutaArchivo As String, _
     Exit Sub
 
 EH:
+    Dim errN As Long:   errN = Err.Number
+    Dim errD As String: errD = Err.Description
     SafeApp False
-    MsgBox "Error en CrearQuerySAB_CM:" & vbCrLf & _
-           "N" & Chr(250) & "mero: " & Err.Number & vbCrLf & _
-           "Descripci" & Chr(243) & "n: " & Err.Description & vbCrLf & vbCrLf & _
-           mStageLog, vbCritical, "SAB CM"
+    MsgBox "Error en CrearQuerySAB_MC:" & vbCrLf & _
+           "N" & Chr(250) & "mero: " & errN & vbCrLf & _
+           "Descripci" & Chr(243) & "n: " & errD & vbCrLf & vbCrLf & _
+           mStageLog, vbCritical, "SAB MC"
 End Sub

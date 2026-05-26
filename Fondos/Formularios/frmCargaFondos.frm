@@ -833,5 +833,3 @@ Private Function HasControl(ByVal name As String) As Boolean
     Err.Clear
     On Error GoTo 0
 End Function
-
-

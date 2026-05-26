@@ -1001,7 +1001,8 @@ Public Sub BuildGraficosCMEnHoja( _
     If op <> "COM" And op <> "VEN" Then op = "COM"
 
     If Not LOHasColumn(loAL, "DESVIACION_MEDIA_%") Then Exit Sub
-    If Not LOHasColumn(loAL, "PROMEDIO_MONTOS") Then Exit Sub
+    If Not LOHasColumn(loAL, "PROMEDIO_MONTOS") And _
+        Not LOHasColumn(loAL, "PROMEDIO_MONTOS_SOLES") Then Exit Sub
     If Not LOHasColumn(loAL, "Documento") Then Exit Sub
 
     Dim ws As Worksheet: Set ws = loAL.parent
@@ -1016,7 +1017,8 @@ Public Sub BuildGraficosCMEnHoja( _
     Dim iKey As Long, iDv As Long, iPm As Long, iTP As Long, iNR As Long
     iKey = GetColIdx(loAL, "Documento")
     iDv = GetColIdx(loAL, "DESVIACION_MEDIA_%")
-    iPm = GetColIdx(loAL, "PROMEDIO_MONTOS")
+    iPm = GetColIdx(loAL, "PROMEDIO_MONTOS_SOLES")
+        If iPm = 0 Then iPm = GetColIdx(loAL, "PROMEDIO_MONTOS")
     iTP = GetColIdx(loAL, "TIPO_PERSONA")
     iNR = GetColIdx(loAL, "NIVEL_RIESGO")
 

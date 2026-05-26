@@ -304,12 +304,12 @@ Private Sub RefreshTCEstado()
     Set lbl = Me.Controls("lblTCEstado")
     If Not gTCDict Is Nothing Then
         If gTCDict.count > 0 Then
-            lbl.caption = "Tipo de cambio cargado en memoria (" & gTCDict.count & " registros)."
+            lbl.caption = "Tipo de cambio en memoria: " & (gTCDict.count \ 2) & " pares fecha/moneda cargados."
             lbl.ForeColor = RGB(0, 128, 0)
             Exit Sub
         End If
     End If
-    lbl.caption = "Sin tipo de cambio en memoria. Las alertas MC usaran montos originales."
+    lbl.caption = "Sin tipo de cambio en memoria. Carga el archivo .xls del SBS antes de procesar Transacciones."
     lbl.ForeColor = RGB(160, 100, 0)
 End Sub
 
@@ -441,11 +441,14 @@ Public Sub OnCargar()
             End If
 
             If gTCDict Is Nothing Or gTCDict.count = 0 Then
-                If MsgBox("No hay tipo de cambio cargado en memoria." & vbCrLf & _
-                          "Las operaciones en moneda extranjera no tendran monto en soles." & vbCrLf & vbCrLf & _
-                          "Continuar de todos modos?", vbQuestion + vbYesNo, "Tipo de Cambio") = vbNo Then
-                    GoTo salir
-                End If
+                MsgBox "No hay tipo de cambio cargado en memoria." & vbCrLf & vbCrLf & _
+                       "Para procesar Movimiento de Caja con montos en soles:" & vbCrLf & _
+                       "  1. Selecciona 'Tipo de Cambio' en el combo superior" & vbCrLf & _
+                       "  2. Elige el archivo .xls descargado del SBS" & vbCrLf & _
+                       "  3. Haz clic en Cargar" & vbCrLf & _
+                       "  4. Luego vuelve a cargar las Transacciones", _
+                       vbExclamation, "Tipo de Cambio requerido"
+                GoTo salir
             End If
 
             Application.Run "CrearQuerySAB_MC", ruta, mesesSel, mcMode, True
@@ -483,11 +486,14 @@ salir:
     Exit Sub
 
 fallo:
+    Dim errN As Long:   errN = Err.Number
+    Dim errD As String: errD = Err.Description
     EndProgressHook
     SetBusy False, "Listo."
     SetStatusOnly 0, "Error al cargar."
     RefreshTCEstado
-    MsgBox "Error al cargar: " & Err.Number & " - " & Err.Description, vbCritical
+    MsgBox "Error al cargar: " & errN & " - " & errD, vbCritical
+    
 End Sub
 
 Public Sub OnCancelar()

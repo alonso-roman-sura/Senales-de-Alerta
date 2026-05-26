@@ -91,6 +91,13 @@ Private Function EsHojaGenerada(ByVal nm As String) As Boolean
         EsHojaGenerada = True
         Exit Function
     End If
+
+    ' --- SAB TC: hoja de tipo de cambio (SAB_TC o SAB_TC_<sufijo>) ---
+    If Left$(u, 6) = "SAB_TC" Then
+        EsHojaGenerada = True
+        Exit Function
+    End If
+    
     ' --- Hojas helper de graficos (ocultas xlSheetVeryHidden) ---
     If Left$(u, 4) = "_GF_" Then
         EsHojaGenerada = True
@@ -295,6 +302,11 @@ Public Sub ResetProceso()
     Next i
 
     EliminarConsultas wb, log
+
+    ' Limpiar el diccionario de tipo de cambio en memoria
+    On Error Resume Next
+    Set gTCDict = Nothing
+    On Error GoTo 0
 
     RstAppFreeze False
 

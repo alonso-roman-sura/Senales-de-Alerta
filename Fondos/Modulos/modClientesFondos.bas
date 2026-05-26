@@ -275,5 +275,3 @@ EH:
     SafeApp False
     MsgBox "Error: " & Err.Description, vbCritical
 End Sub
-
-

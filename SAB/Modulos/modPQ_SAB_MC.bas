@@ -1400,6 +1400,15 @@ Public Sub CrearQuerySAB_MC(ByVal rutaArchivo As String, _
 
     Dim connRaw As WorkbookConnection: Set connRaw = EnsurePQConnection("SAB_MC_RAW")
 
+    If connRaw Is Nothing Then
+        SafeApp False
+        MsgBox "No se pudo crear la conexi" & Chr(243) & "n Power Query para el archivo." & vbCrLf & vbCrLf & _
+               "Verifique que Power Query est" & Chr(233) & " disponible en esta instalaci" & Chr(243) & "n de Excel " & _
+               "y que el archivo no est" & Chr(233) & " abierto en otro programa.", _
+               vbCritical, "SAB MC - Error de conexion"
+        Exit Sub
+    End If
+
     Dim tStage As Double
 
     tStage = Timer
@@ -1438,7 +1447,7 @@ Public Sub CrearQuerySAB_MC(ByVal rutaArchivo As String, _
         Exit Sub
     End If
 
-    ' Alertas
+    ' --- Alertas ---
     Dim shAlDep As Worksheet, shAlRet As Worksheet
     Dim loAlDep As ListObject, loAlRet As ListObject
 
@@ -1466,7 +1475,7 @@ Public Sub CrearQuerySAB_MC(ByVal rutaArchivo As String, _
         End If
     End If
 
-    ' Sufijo de periodo
+    ' --- Sufijo de periodo ---
     Dim minD As Date, maxD As Date, gotDates As Boolean
     gotDates = GetMinMaxDateFromLO(loMain, "Fecha", minD, maxD)
     If Not gotDates Then gotDates = GetMinMaxDateFromLO(loRaw, "Fecha", minD, maxD)
@@ -1480,7 +1489,7 @@ Public Sub CrearQuerySAB_MC(ByVal rutaArchivo As String, _
     End If
     suf = MesAbrevES(ini) & "_" & MesAbrevES(fin) & "_" & Year(fin)
 
-    ' Renombrar hojas
+    ' --- Renombrar hojas ---
     Dim nmRaw  As String: nmRaw = SanitizeSheetName("SAB_MC_RAW_" & suf)
     Dim nmMain As String: nmMain = SanitizeSheetName("SAB_MC_" & suf)
 
@@ -1508,6 +1517,7 @@ Public Sub CrearQuerySAB_MC(ByVal rutaArchivo As String, _
         RenameSheetExact shAlRet, nmAlRet
     End If
 
+    ' --- Graficos ---
     If BUILD_GRAFICOS Then
         SAB_Progress 0.85, "Generando graficos..."
         If makeDep And Not loAlDep Is Nothing Then
@@ -1540,13 +1550,17 @@ Public Sub CrearQuerySAB_MC(ByVal rutaArchivo As String, _
     Exit Sub
 
 EH:
+    Dim ehNum  As Long:   ehNum = Err.Number
+    Dim ehDesc As String: ehDesc = Err.Description
+    Dim ehLine As Long:   ehLine = Erl
     SafeApp False
-    MsgBox "Error inesperado en CrearQuerySAB_MC:" & vbCrLf & _
-           "Numero: " & Err.Number & vbCrLf & _
-           "Descripcion: " & Err.Description & vbCrLf & vbCrLf & _
-           IIf(Len(mStageLog) > 0, "Log:" & vbCrLf & mStageLog, ""), _
-           vbCritical, "SAB MC - Error"
+    MsgBox "Error en CrearQuerySAB_MC:" & vbCrLf & _
+           "N" & Chr(250) & "mero: " & ehNum & vbCrLf & _
+           "L" & Chr(237) & "nea: " & ehLine & vbCrLf & _
+           "Descripci" & Chr(243) & "n: " & ehDesc & vbCrLf & vbCrLf & _
+           mStageLog, vbCritical, "SAB MC"
 End Sub
+
 
 '======================
 ' CrearHojaTipoCambio

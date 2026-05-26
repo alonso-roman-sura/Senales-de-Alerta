@@ -132,4 +132,3 @@ Public Sub OnFormTerminated()
     modUF_PollProxy.Detach
     On Error GoTo 0
 End Sub
-

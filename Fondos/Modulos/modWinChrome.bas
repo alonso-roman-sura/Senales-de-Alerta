@@ -67,5 +67,3 @@ Public Sub EnableMinimizeBox(ByVal uf As Object)
     DrawMenuBar w.h
     On Error GoTo 0
 End Sub
-
-
