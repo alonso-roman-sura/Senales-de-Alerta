@@ -385,19 +385,17 @@ Public Sub OnCargar()
     If tipoU = "TIPO DE CAMBIO" Then
         ProgressToCurrent 0.1, "Cargando tipo de cambio..."
 
-        ' Detectar formato: .xls = descarga directa SBS, .xlsx/.xlsm = script Python
-        Dim extTC As String: extTC = LCase$(Right$(Trim$(ruta), 4))
-        If extTC = ".xls" Then
+        Dim ext As String: ext = LCase$(Right$(Trim$(ruta), 4))
+        If ext = ".xls" Then
             Set gTCDict = modPQ_SAB_MC.LoadTipoCambioSBS(ruta)
         Else
             Set gTCDict = modPQ_SAB_MC.LoadTipoCambioDict(ruta)
         End If
 
-        If gTCDict Is Nothing Or gTCDict.count = 0 Then
-            MsgBox "No se encontraron datos de tipo de cambio en el archivo seleccionado." & _
-                   vbCrLf & ruta, vbExclamation, "Tipo de Cambio"
-            GoTo salir
-        End If
+        ' Las funciones de carga ya mostraron el error detallado si fallaron.
+        ' Solo salir sin mensaje adicional si no hay datos.
+        If gTCDict Is Nothing Or gTCDict.count = 0 Then GoTo salir
+
         ProgressToCurrent 1, "Tipo de cambio cargado: " & gTCDict.count & " registros."
         EndProgressHook
         SetBusy False, "Tipo de cambio listo."
@@ -481,12 +479,14 @@ Public Sub OnCargar()
 salir:
     EndProgressHook
     SetBusy False, "Listo."
+    RefreshTCEstado
     Exit Sub
 
 fallo:
     EndProgressHook
     SetBusy False, "Listo."
     SetStatusOnly 0, "Error al cargar."
+    RefreshTCEstado
     MsgBox "Error al cargar: " & Err.Number & " - " & Err.Description, vbCritical
 End Sub
 
@@ -495,6 +495,7 @@ Public Sub OnCancelar()
         If MsgBox("Hay una operacion en progreso." & vbCrLf & _
                   "Deseas cerrar de todos modos?", vbQuestion + vbYesNo) = vbNo Then Exit Sub
         EndProgressHook
+        RefreshTCEstado
         Unload Me
         Exit Sub
     End If

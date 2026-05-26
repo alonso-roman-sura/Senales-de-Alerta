@@ -4,7 +4,7 @@ Option Explicit
 ' modPQ_SAB_MC
 ' RAW via PQ (lectura del archivo externo).
 ' MAIN y Alertas en VBA para evitar re-evaluacion lazy de PQ sobre 61k filas.
-' Punto de entrada: CrearQuerySAB_MC(rutaArchivo, mesesSel, opMode, showProgress, rutaTC)
+' Punto de entrada: CrearQuerySAB_MC(rutaArchivo, mesesSel, opMode, showProgress)
 '==========================
 
 Private Const BUILD_GRAFICOS As Boolean = True
@@ -242,9 +242,13 @@ Private Function GetMinMaxDateFromLO(ByVal lo As ListObject, ByVal colName As St
     On Error Resume Next: Set lc = lo.ListColumns(colName): On Error GoTo 0
     If lc Is Nothing Then Exit Function
     If lc.DataBodyRange Is Nothing Then Exit Function
-    Dim c As Range, d As Date, gotAny As Boolean
-    For Each c In lc.DataBodyRange.Cells
-        If TryCoerceExcelDate(c.Value2, d) Then
+    Dim data As Variant: data = lc.DataBodyRange.Value2
+    Dim nR As Long: nR = UBound(data, 1)
+    Dim gotAny As Boolean
+    Dim d As Date
+    Dim i As Long
+    For i = 1 To nR
+        If TryCoerceExcelDate(data(i, 1), d) Then
             If Not gotAny Then
                 outMin = d: outMax = d: gotAny = True
             Else
@@ -252,7 +256,7 @@ Private Function GetMinMaxDateFromLO(ByVal lo As ListObject, ByVal colName As St
                 If d > outMax Then outMax = d
             End If
         End If
-    Next c
+    Next i
     GetMinMaxDateFromLO = gotAny
 End Function
 
@@ -263,8 +267,17 @@ Public Function LoadTipoCambioDict(ByVal rutaTC As String, _
                                    Optional ByVal crearHoja As Boolean = True) As Object
     Dim d As Object: Set d = CreateObject("Scripting.Dictionary")
     Set LoadTipoCambioDict = d
-    If Len(Trim$(rutaTC)) = 0 Then Exit Function
-    If Dir(rutaTC, vbNormal) = "" Then Exit Function
+
+    If Len(Trim$(rutaTC)) = 0 Then
+        MsgBox "Ruta del archivo de tipo de cambio vac" & Chr(237) & "a.", _
+               vbExclamation, "Tipo de Cambio"
+        Exit Function
+    End If
+    If Dir(rutaTC, vbNormal) = "" Then
+        MsgBox "El archivo de tipo de cambio no existe:" & vbCrLf & rutaTC, _
+               vbExclamation, "Tipo de Cambio"
+        Exit Function
+    End If
 
     Dim wb As Workbook
     On Error Resume Next
@@ -272,17 +285,31 @@ Public Function LoadTipoCambioDict(ByVal rutaTC As String, _
     Set wb = Workbooks.Open(rutaTC, ReadOnly:=True, UpdateLinks:=False)
     Application.ScreenUpdating = True
     On Error GoTo 0
-    If wb Is Nothing Then Exit Function
+
+    If wb Is Nothing Then
+        MsgBox "No se pudo abrir el archivo de tipo de cambio:" & vbCrLf & rutaTC, _
+               vbExclamation, "Tipo de Cambio"
+        Exit Function
+    End If
 
     Dim ws As Worksheet
     On Error Resume Next: Set ws = wb.Worksheets("TipoCambio"): On Error GoTo 0
-    If ws Is Nothing Then wb.Close False: Exit Function
+    If ws Is Nothing Then
+        wb.Close False
+        MsgBox "El archivo no contiene una hoja llamada 'TipoCambio'." & vbCrLf & vbCrLf & _
+               "Verifique que el archivo fue generado por el script de descarga SBS.", _
+               vbExclamation, "Tipo de Cambio"
+        Exit Function
+    End If
 
     Dim nRows As Long: nRows = ws.Cells(ws.rows.count, 1).End(xlUp).Row
-    If nRows < 2 Then wb.Close False: Exit Function
+    If nRows < 2 Then
+        wb.Close False
+        MsgBox "La hoja 'TipoCambio' no contiene datos.", vbExclamation, "Tipo de Cambio"
+        Exit Function
+    End If
 
     Dim data As Variant: data = ws.Range(ws.Cells(1, 1), ws.Cells(nRows, 5)).Value2
-
     Dim i As Long
     Dim minFecha As Date: minFecha = #12/31/9999#
     Dim maxFecha As Date: maxFecha = #1/1/1900#
@@ -302,10 +329,9 @@ Public Function LoadTipoCambioDict(ByVal rutaTC As String, _
         If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo NextTC
         On Error GoTo 0
 
-        ' Guardar ambas tasas: clave "COMP|SERIAL|COD" y "VENT|SERIAL|COD"
         Dim serial As String: serial = CStr(CLng(CDbl(dFecha)))
-        Dim keyC As String: keyC = "COMP|" & serial & "|" & sCod
-        Dim keyV As String: keyV = "VENT|" & serial & "|" & sCod
+        Dim keyC   As String: keyC = "COMP|" & serial & "|" & sCod
+        Dim keyV   As String: keyV = "VENT|" & serial & "|" & sCod
 
         If Not IsEmpty(vComp) And Not d.exists(keyC) Then d.Add keyC, CDbl(vComp)
         If Not IsEmpty(vVenta) And Not d.exists(keyV) Then d.Add keyV, CDbl(vVenta)
@@ -318,35 +344,56 @@ NextTC:
 
     wb.Close False
 
-    ' Crear hoja en el workbook activo si se solicito
-    If crearHoja And gotAny And d.count > 0 Then
+    If Not gotAny Or d.count = 0 Then
+        MsgBox "No se encontraron registros v" & Chr(225) & "lidos de tipo de cambio en el archivo.", _
+               vbExclamation, "Tipo de Cambio"
+        Exit Function
+    End If
+
+    If crearHoja Then
         Dim sufTC As String
         sufTC = MesAbrevES(minFecha) & "_" & Year(minFecha) & "_" & _
                 MesAbrevES(maxFecha) & "_" & Year(maxFecha)
-        Dim nmHoja As String: nmHoja = SanitizeSheetName("SAB_TC_" & sufTC)
-        CrearHojaTipoCambio data, nRows, nmHoja
+        CrearHojaTipoCambio data, nRows, SanitizeSheetName("SAB_TC_" & sufTC)
     End If
 End Function
 
+'======================
+' NombreToCodigoTC
+'======================
 Private Function NombreToCodigoTC(ByVal nombre As String) As String
     Select Case UCase$(Trim$(nombre))
-        Case "DÓLAR DE N.A.", "DOLAR DE N.A.", "US DOLLAR", "USD": NombreToCodigoTC = "USD"
-        Case "EURO", "EUR":                                          NombreToCodigoTC = "EUR"
-        Case "LIBRA ESTERLINA", "GBP":                              NombreToCodigoTC = "GBP"
-        Case "YEN JAPONÉS", "YEN JAPONES", "JPY":                   NombreToCodigoTC = "JPY"
+        Case "D" & Chr(211) & "LAR DE N.A.", "DOLAR DE N.A.", "US DOLLAR", "USD":
+            NombreToCodigoTC = "USD"
+        Case "EURO", "EUR":
+            NombreToCodigoTC = "EUR"
+        Case "LIBRA ESTERLINA", "GBP":
+            NombreToCodigoTC = "GBP"
+        Case "YEN JAPON" & Chr(201) & "S", "YEN JAPONES", "JPY":
+            NombreToCodigoTC = "JPY"
         Case Else
-            ' Tomar las primeras 3 letras como fallback
             Dim t As String: t = Trim$(nombre)
-            If Len(t) >= 3 Then NombreToCodigoTC = UCase$(Left$(t, 3)) Else NombreToCodigoTC = t
+            NombreToCodigoTC = IIf(Len(t) >= 3, UCase$(Left$(t, 3)), t)
     End Select
 End Function
 
+'======================
+' LoadTipoCambioSBS
+' Lee el formato descargado directamente de la web de la SBS (.xls)
+'======================
 Public Function LoadTipoCambioSBS(ByVal rutaSBS As String, _
                                    Optional ByVal crearHoja As Boolean = True) As Object
     Dim d As Object: Set d = CreateObject("Scripting.Dictionary")
     Set LoadTipoCambioSBS = d
-    If Len(Trim$(rutaSBS)) = 0 Then Exit Function
-    If Dir(rutaSBS, vbNormal) = "" Then Exit Function
+
+    If Len(Trim$(rutaSBS)) = 0 Then
+        MsgBox "Ruta del archivo SBS vac" & Chr(237) & "a.", vbExclamation, "Tipo de Cambio"
+        Exit Function
+    End If
+    If Dir(rutaSBS, vbNormal) = "" Then
+        MsgBox "El archivo SBS no existe:" & vbCrLf & rutaSBS, vbExclamation, "Tipo de Cambio"
+        Exit Function
+    End If
 
     Dim wb As Workbook
     On Error Resume Next
@@ -354,16 +401,29 @@ Public Function LoadTipoCambioSBS(ByVal rutaSBS As String, _
     Set wb = Workbooks.Open(rutaSBS, ReadOnly:=True, UpdateLinks:=False)
     Application.ScreenUpdating = True
     On Error GoTo 0
-    If wb Is Nothing Then Exit Function
 
-    ' El archivo SBS tiene una sola hoja con nombre variable (ej: "reporte (2)")
+    If wb Is Nothing Then
+        MsgBox "No se pudo abrir el archivo SBS:" & vbCrLf & rutaSBS, _
+               vbExclamation, "Tipo de Cambio"
+        Exit Function
+    End If
+
+    If wb.Worksheets.count = 0 Then
+        wb.Close False
+        MsgBox "El archivo SBS no contiene hojas.", vbExclamation, "Tipo de Cambio"
+        Exit Function
+    End If
+
     Dim ws As Worksheet: Set ws = wb.Worksheets(1)
     Dim nRows As Long: nRows = ws.Cells(ws.rows.count, 1).End(xlUp).Row
-    If nRows < 2 Then wb.Close False: Exit Function
+    If nRows < 2 Then
+        wb.Close False
+        MsgBox "El archivo SBS no contiene datos.", vbExclamation, "Tipo de Cambio"
+        Exit Function
+    End If
 
     Dim data As Variant: data = ws.Range(ws.Cells(1, 1), ws.Cells(nRows, 4)).Value2
 
-    ' Detectar columnas por encabezado
     Dim colFecha As Long, colMoneda As Long, colComp As Long, colVenta As Long
     Dim j As Long
     For j = 1 To 4
@@ -374,8 +434,15 @@ Public Function LoadTipoCambioSBS(ByVal rutaSBS As String, _
             Case "VENTA":   colVenta = j
         End Select
     Next j
+
     If colFecha = 0 Or colMoneda = 0 Or colComp = 0 Then
-        wb.Close False: Exit Function
+        wb.Close False
+        MsgBox "El archivo SBS no tiene el formato esperado." & vbCrLf & vbCrLf & _
+               "Se esperan columnas: FECHA, MONEDA, COMPRA, VENTA." & vbCrLf & _
+               "Verifique que descarg" & Chr(243) & " el reporte correcto de la p" & _
+               Chr(225) & "gina de la SBS.", _
+               vbExclamation, "Tipo de Cambio"
+        Exit Function
     End If
 
     Dim i As Long
@@ -383,9 +450,8 @@ Public Function LoadTipoCambioSBS(ByVal rutaSBS As String, _
     Dim maxFecha As Date: maxFecha = #1/1/1900#
     Dim gotAny As Boolean
 
-    ' Construir array para CrearHojaTipoCambio (5 cols: Fecha,Codigo,Moneda,Compra,Venta)
     ReDim dataOut(1 To nRows, 1 To 5) As Variant
-    dataOut(1, 1) = "FECHA": dataOut(1, 2) = "CODIGO"
+    dataOut(1, 1) = "FECHA":  dataOut(1, 2) = "CODIGO"
     dataOut(1, 3) = "MONEDA": dataOut(1, 4) = "Compra": dataOut(1, 5) = "Venta"
     Dim rOut As Long: rOut = 1
 
@@ -395,7 +461,7 @@ Public Function LoadTipoCambioSBS(ByVal rutaSBS As String, _
 
         Dim dF As Date
         On Error Resume Next: dF = CDate(vF): On Error GoTo 0
-        If dF = 0 Or IsError(dF) Then GoTo NextSBS
+        If dF = 0 Then GoTo NextSBS
 
         Dim sNom As String: sNom = Trim$(CStr(data(i, colMoneda)))
         Dim sCod As String: sCod = NombreToCodigoTC(sNom)
@@ -405,8 +471,8 @@ Public Function LoadTipoCambioSBS(ByVal rutaSBS As String, _
         Dim vV As Variant: vV = IIf(colVenta > 0, data(i, colVenta), Empty)
 
         Dim serial As String: serial = CStr(CLng(CDbl(dF)))
-        Dim keyC As String: keyC = "COMP|" & serial & "|" & sCod
-        Dim keyV As String: keyV = "VENT|" & serial & "|" & sCod
+        Dim keyC   As String: keyC = "COMP|" & serial & "|" & sCod
+        Dim keyV   As String: keyV = "VENT|" & serial & "|" & sCod
 
         If Not IsEmpty(vC) And Not d.exists(keyC) Then d.Add keyC, CDbl(vC)
         If Not IsEmpty(vV) And Not d.exists(keyV) Then d.Add keyV, CDbl(vV)
@@ -426,11 +492,18 @@ NextSBS:
 
     wb.Close False
 
-    If crearHoja And gotAny And rOut > 1 Then
+    If Not gotAny Or d.count = 0 Then
+        MsgBox "No se encontraron registros v" & Chr(225) & "lidos en el archivo SBS." & vbCrLf & vbCrLf & _
+               "Verifique que el archivo contenga datos de tipo de cambio.", _
+               vbExclamation, "Tipo de Cambio"
+        Exit Function
+    End If
+
+    If crearHoja And rOut > 1 Then
         Dim sufTC As String
         sufTC = MesAbrevES(minFecha) & "_" & Year(minFecha) & "_" & _
                 MesAbrevES(maxFecha) & "_" & Year(maxFecha)
-        CrearHojaTipoCambio dataOut, rOut, "SAB_TC_" & sufTC
+        CrearHojaTipoCambio dataOut, rOut, SanitizeSheetName("SAB_TC_" & sufTC)
     End If
 
     Set LoadTipoCambioSBS = d
@@ -438,25 +511,19 @@ End Function
 
 '======================
 ' TryRebuildTCDictFromSheet
-' Intenta reconstruir gTCDict desde la hoja SAB_TC_* del workbook.
-' Devuelve True si lo logro.
 '======================
 Public Function TryRebuildTCDictFromSheet() As Boolean
     TryRebuildTCDictFromSheet = False
-    Dim ws As Worksheet
-    Dim lo As ListObject
-    Dim shTC As Worksheet
+    Dim ws As Worksheet, lo As ListObject, shTC As Worksheet
 
-    ' Buscar la primera hoja cuyo nombre empiece por SAB_TC_
     For Each ws In ThisWorkbook.Worksheets
-        If Left$(UCase$(ws.Name), 7) = "SAB_TC_" Then
+        If UCase$(ws.Name) = "SAB_TC" Or Left$(UCase$(ws.Name), 7) = "SAB_TC_" Then
             Set shTC = ws
             Exit For
         End If
     Next ws
     If shTC Is Nothing Then Exit Function
 
-    ' Buscar ListObject en esa hoja
     For Each lo In shTC.ListObjects
         If lo.DataBodyRange Is Nothing Then GoTo NextLO
         Dim colFecha As Long, colCod As Long, colComp As Long, colVenta As Long
@@ -481,14 +548,14 @@ Public Function TryRebuildTCDictFromSheet() As Boolean
             Dim sCod As String: sCod = UCase$(Trim$(CStr(data(i, colCod))))
             If IsEmpty(vF) Or Len(sCod) = 0 Or sCod = "PEN" Then GoTo NextRow
 
-            Dim dF As Date
-            On Error Resume Next: dF = CDate(vF)
+            Dim dFR As Date
+            On Error Resume Next: dFR = CDate(vF)
             If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo NextRow
             On Error GoTo 0
 
-            Dim serial As String: serial = CStr(CLng(CDbl(dF)))
-            Dim keyC As String: keyC = "COMP|" & serial & "|" & sCod
-            Dim keyV As String: keyV = "VENT|" & serial & "|" & sCod
+            Dim serial As String: serial = CStr(CLng(CDbl(dFR)))
+            Dim keyC   As String: keyC = "COMP|" & serial & "|" & sCod
+            Dim keyV   As String: keyV = "VENT|" & serial & "|" & sCod
 
             If Not IsEmpty(data(i, colComp)) And Not d.exists(keyC) Then
                 d.Add keyC, CDbl(data(i, colComp))
@@ -521,12 +588,7 @@ Private Function GetTCRate(ByVal dTC As Object, _
     If sCod = "PEN" Or sCod = "S/" Or sCod = "S/." Or Len(sCod) = 0 Then
         GetTCRate = 1: Exit Function
     End If
-
-    ' DEP: el SAB recibe divisas del cliente (compra) -> tasa Compra
-    ' RET: el SAB entrega divisas al cliente (vende)  -> tasa Venta
-    Dim prefix As String
-    prefix = IIf(UCase$(opType) = "RET", "VENT", "COMP")
-
+    Dim prefix As String: prefix = IIf(UCase$(opType) = "RET", "VENT", "COMP")
     Dim k As Long
     For k = 0 To 7
         Dim tryKey As String
@@ -683,8 +745,15 @@ Private Function BuildMainVBA(ByVal loRaw As ListObject, _
                                ByVal loMainName As String, _
                                Optional ByVal dTC As Object = Nothing) As ListObject
     Set BuildMainVBA = Nothing
-    If loRaw Is Nothing Then Exit Function
-    If loRaw.DataBodyRange Is Nothing Then Exit Function
+    If loRaw Is Nothing Then
+        AppendStageLog "MAIN-ERR", 0
+        mStageLog = mStageLog & vbCrLf & "(!) MAIN: la tabla RAW es Nothing. Verifique que el archivo origen se cargo correctamente."
+        Exit Function
+    End If
+    If loRaw.DataBodyRange Is Nothing Then
+        mStageLog = mStageLog & vbCrLf & "(!) MAIN: la tabla RAW no tiene datos. El archivo puede estar vacio o el formato no es compatible."
+        Exit Function
+    End If
 
     Dim depName As String: depName = "Dep" & Chr(243) & "sito"
 
@@ -711,14 +780,24 @@ Private Function BuildMainVBA(ByVal loRaw As ListObject, _
     Dim cObs    As Long: cObs = PickColIdx(rawColNames, "Observaciones|Obs")
     Dim cMon    As Long: cMon = PickColIdx(rawColNames, "Moneda")
 
-    If cFecha = 0 Then Exit Function
+    If cFecha = 0 Then
+        mStageLog = mStageLog & vbCrLf & "(!) MAIN: no se encontr" & Chr(243) & _
+                    " columna de fecha en RAW. Verifique el formato del archivo origen." & vbCrLf & _
+                    "Columnas encontradas: " & Join(rawColNames, ", ")
+        Exit Function
+    End If
+
+    If cCuenta = 0 Then
+        mStageLog = mStageLog & vbCrLf & "(!) MAIN: no se encontr" & Chr(243) & _
+                    " columna de cuenta en RAW. Verifique el formato del archivo origen."
+        Exit Function
+    End If
 
     Dim nRows As Long: nRows = loRaw.DataBodyRange.rows.count
     Dim raw   As Variant: raw = loRaw.DataBodyRange.Value2
 
     Dim TARGET_COLS As Long: TARGET_COLS = 20
 
-    ' Nuevo orden: RUC/NIT y CUENTAS a la derecha de Cuenta
     Const O_FECHA     As Long = 1:  Const O_TRANSAC   As Long = 2:  Const O_CUENTA  As Long = 3
     Const O_RUCNIT    As Long = 4:  Const O_TIPOP     As Long = 5:  Const O_CTAS    As Long = 6
     Const O_NOMBRE    As Long = 7:  Const O_OPE       As Long = 8:  Const O_TIPO    As Long = 9
@@ -752,7 +831,6 @@ Private Function BuildMainVBA(ByVal loRaw As ListObject, _
         End If
     Next vkR
 
-    ' Primera pasada: fecha maxima
     Dim maxDateRaw As Date: maxDateRaw = 0
     Dim tmpD As Date
     For i = 1 To nRows
@@ -774,6 +852,9 @@ Private Function BuildMainVBA(ByVal loRaw As ListObject, _
         finMes = DateSerial(Year(Date), Month(Date) + 1, 0)
     End If
     iniMes = DateSerial(Year(finMes), Month(finMes) - (mesesSel - 1), 1)
+
+    Dim rowsConMonedaExtranjera As Long: rowsConMonedaExtranjera = 0
+    Dim rowsSinTC As Long: rowsSinTC = 0
 
     For i = 1 To nRows
         vF = raw(i, cFecha)
@@ -840,7 +921,6 @@ Private Function BuildMainVBA(ByVal loRaw As ListObject, _
         If cObs > 0 Then outArr(r, O_OBS) = raw(i, cObs)
         If cMon > 0 Then outArr(r, O_MON) = raw(i, cMon)
 
-        ' Calcular Monto en Soles usando TC
         Dim sCodMon As String: sCodMon = "PEN"
         If cMon > 0 Then sCodMon = UCase$(Trim$(CStr(raw(i, cMon))))
         Dim montoOrig As Double
@@ -848,16 +928,22 @@ Private Function BuildMainVBA(ByVal loRaw As ListObject, _
         If sCodMon = "PEN" Or sCodMon = "S/" Or sCodMon = "S/." Then
             outArr(r, O_MONTO_SOL) = montoOrig
             outArr(r, O_TC_RATE) = 1
-        ElseIf Not dTC Is Nothing Then
-            Dim opTypeRow As String: opTypeRow = IIf(hasDep, "DEP", "RET")
-            Dim tcRate As Double: tcRate = GetTCRate(dTC, dF, sCodMon, opTypeRow)
-            If tcRate > 0 Then
-                outArr(r, O_MONTO_SOL) = Round(montoOrig * tcRate, 2)
-                outArr(r, O_TC_RATE) = tcRate
+        Else
+            rowsConMonedaExtranjera = rowsConMonedaExtranjera + 1
+            If Not dTC Is Nothing Then
+                Dim opTypeRow As String: opTypeRow = IIf(hasDep, "DEP", "RET")
+                Dim tcRate As Double: tcRate = GetTCRate(dTC, dF, sCodMon, opTypeRow)
+                If tcRate > 0 Then
+                    outArr(r, O_MONTO_SOL) = Round(montoOrig * tcRate, 2)
+                    outArr(r, O_TC_RATE) = tcRate
+                Else
+                    rowsSinTC = rowsSinTC + 1
+                End If
+            Else
+                rowsSinTC = rowsSinTC + 1
             End If
         End If
 
-        ' Enriquecer con RUC/NIT desde Clientes_SAB
         If cCuenta > 0 Then
             Dim sCtaM As String: sCtaM = CleanStr(CStr(raw(i, cCuenta)))
             If dMain.exists(sCtaM) Then
@@ -865,14 +951,13 @@ Private Function BuildMainVBA(ByVal loRaw As ListObject, _
                 Dim pipM  As Long:   pipM = InStr(sRawM, "|")
                 If pipM > 0 Then
                     Dim sRucEnr As String: sRucEnr = CleanStr(Left$(sRawM, pipM - 1))
-                    ' Guardar como string para preservar ceros iniciales (DNI con 0)
-                    outArr(r, O_RUCNIT) = "'" & sRucEnr
+                    outArr(r, O_RUCNIT) = sRucEnr
                     outArr(r, O_TIPOP) = UCase$(CleanStr(Mid$(sRawM, pipM + 1)))
                     If dRucCtas.exists(sRucEnr) Then
                         outArr(r, O_CTAS) = CStr(dRucCtas(sRucEnr))
                     End If
                 Else
-                    outArr(r, O_RUCNIT) = "'" & CleanStr(sRawM)
+                    outArr(r, O_RUCNIT) = CleanStr(sRawM)
                 End If
             End If
         End If
@@ -880,10 +965,22 @@ Private Function BuildMainVBA(ByVal loRaw As ListObject, _
 SkipRow:
     Next i
 
-    If r = 0 Then Exit Function
+    If r = 0 Then
+        mStageLog = mStageLog & vbCrLf & "(!) MAIN: ninguna fila super" & Chr(243) & _
+                    " los filtros." & vbCrLf & _
+                    "Periodo esperado: " & Format$(iniMes, "dd/mm/yyyy") & " al " & Format$(finMes, "dd/mm/yyyy") & "." & vbCrLf & _
+                    "Verifique que el archivo corresponde al periodo y tiene clases DPE/DFS/RAF/RFS."
+        Exit Function
+    End If
+
+    ' Loguear advertencia de TC si hay moneda extranjera sin convertir
+    If rowsSinTC > 0 Then
+        mStageLog = mStageLog & vbCrLf & "(!) " & rowsSinTC & " de " & rowsConMonedaExtranjera & _
+                    " fila(s) en moneda extranjera sin TC disponible: Monto en Soles quedar" & _
+                    Chr(225) & " en blanco para esas filas."
+    End If
 
     QuickSortByCol outArr, 1, r, O_FECHA
-
     ClearSheetButKeepName shMain
 
     Dim hdrs As Variant
@@ -894,9 +991,7 @@ SkipRow:
     Dim j As Long
     For j = 0 To UBound(hdrs): shMain.Cells(1, j + 1).Value = hdrs(j): Next j
 
-    ' Pre-formatear columna RUC/NIT como texto antes de escribir el array
     shMain.Range(shMain.Cells(2, O_RUCNIT), shMain.Cells(r + 1, O_RUCNIT)).NumberFormat = "@"
-
     shMain.Range(shMain.Cells(2, 1), shMain.Cells(r + 1, TARGET_COLS)).Value = outArr
     shMain.Columns(O_FECHA).NumberFormat = "dd/mm/yyyy"
 
@@ -905,12 +1000,11 @@ SkipRow:
                      shMain.Range(shMain.Cells(1, 1), shMain.Cells(r + 1, TARGET_COLS)), , xlYes)
     On Error Resume Next: loMain.Name = loMainName: On Error GoTo 0
     On Error Resume Next: loMain.TableStyle = TABLE_STYLE: On Error GoTo 0
-
-    ' AutoFit todas las columnas
     On Error Resume Next: shMain.Cells.EntireColumn.AutoFit: On Error GoTo 0
 
     Set BuildMainVBA = loMain
 End Function
+
 '======================
 ' QuickSort
 '======================
@@ -988,6 +1082,9 @@ Public Function BuildCuentaDocDict() As Object
                                 End If
                             End If
                         Next i
+                    Else
+                        mStageLog = mStageLog & vbCrLf & "(!) Clientes_SAB encontrada pero le faltan columnas." & vbCrLf & _
+                                    "Se requieren: Cuenta, RUC/NIT. Alertas agrupadas por n" & Chr(250) & "mero de cuenta."
                     End If
                 End If
                 Set BuildCuentaDocDict = d
@@ -997,7 +1094,7 @@ Public Function BuildCuentaDocDict() As Object
     Next ws
 
     If Len(mStageLog) > 0 Then mStageLog = mStageLog & vbCrLf
-    mStageLog = mStageLog & "(!) Clientes_SAB no encontrada: alertas agrupadas por Cuenta"
+    mStageLog = mStageLog & "(!) Clientes_SAB no encontrada: alertas agrupadas por n" & Chr(250) & "mero de cuenta."
     Set BuildCuentaDocDict = d
 End Function
 
@@ -1009,8 +1106,14 @@ Private Function BuildAlertasVBA(ByVal loMain As ListObject, _
                                    ByVal shAl As Worksheet, _
                                    ByVal loAlName As String) As ListObject
     Set BuildAlertasVBA = Nothing
-    If loMain Is Nothing Then Exit Function
-    If loMain.DataBodyRange Is Nothing Then Exit Function
+    If loMain Is Nothing Then
+        mStageLog = mStageLog & vbCrLf & "(!) Alertas [" & which & "]: MAIN es Nothing, no se pueden calcular alertas."
+        Exit Function
+    End If
+    If loMain.DataBodyRange Is Nothing Then
+        mStageLog = mStageLog & vbCrLf & "(!) Alertas [" & which & "]: MAIN sin datos."
+        Exit Function
+    End If
 
     Dim op As String: op = UCase$(Trim$(which))
     If op <> "DEP" And op <> "RET" Then op = "DEP"
@@ -1025,9 +1128,8 @@ Private Function BuildAlertasVBA(ByVal loMain As ListObject, _
     Dim colMonto    As Long: colMonto = 0
     Dim colClase    As Long: colClase = 0
     Dim colMontoSol As Long: colMontoSol = 0
+    Dim colFiltro   As Long: colFiltro = 0
     Dim i As Long
-
-    Dim colFiltro As Long: colFiltro = 0   ' columna DEP o RET para filtrar filas
 
     For i = 1 To loMain.ListColumns.count
         Select Case loMain.ListColumns(i).Name
@@ -1040,12 +1142,25 @@ Private Function BuildAlertasVBA(ByVal loMain As ListObject, _
         End Select
     Next i
 
-    ' colFiltro determina que filas incluir (DEP o RET con valor distinto de cero).
-    ' colMonto es el valor a sumar: Monto en Soles si existe, sino la columna original.
-    If colFiltro = 0 Then Exit Function
+    If colFiltro = 0 Then
+        mStageLog = mStageLog & vbCrLf & "(!) Alertas [" & op & "]: no se encontr" & Chr(243) & _
+                    " columna de operaci" & Chr(243) & "n en MAIN (" & _
+                    IIf(op = "DEP", "Dep" & Chr(243) & "sito", "Retiro") & ")."
+        Exit Function
+    End If
+
     colMonto = IIf(colMontoSol > 0, colMontoSol, colFiltro)
 
-    If colCuenta = 0 Or colMonto = 0 Then Exit Function
+    If colCuenta = 0 Then
+        mStageLog = mStageLog & vbCrLf & "(!) Alertas [" & op & "]: columna Cuenta no encontrada en MAIN."
+        Exit Function
+    End If
+
+    ' Advertir si colMontoSol = 0 (se usaran montos originales, potencialmente en divisas)
+    If colMontoSol = 0 Then
+        mStageLog = mStageLog & vbCrLf & "(!) Alertas [" & op & "]: columna 'Monto en Soles' no encontrada. " & _
+                    "Se usar" & Chr(225) & "n montos originales, que pueden incluir divisas no convertidas."
+    End If
 
     Dim nRows As Long: nRows = loMain.DataBodyRange.rows.count
     Dim data  As Variant: data = loMain.DataBodyRange.Value2
@@ -1055,14 +1170,13 @@ Private Function BuildAlertasVBA(ByVal loMain As ListObject, _
     Dim dTipo    As Object: Set dTipo = CreateObject("Scripting.Dictionary")
     Dim dCuentas As Object: Set dCuentas = CreateObject("Scripting.Dictionary")
     Dim dNOpReal As Object: Set dNOpReal = CreateObject("Scripting.Dictionary")
-    
+
     Dim vM As Variant, dM As Double
     Dim vC As Variant, sCuenta As String, sKey As String
     Dim vF As Variant, dF As Date, lF As Long
     Dim dayKey As String
 
     For i = 1 To nRows
-        ' Verificar que la fila corresponde a la operacion (DEP o RET)
         Dim vFiltro As Variant: vFiltro = data(i, colFiltro)
         If IsEmpty(vFiltro) Or IsNull(vFiltro) Or IsError(vFiltro) Then GoTo SkipAl
         Dim dFiltro As Double
@@ -1111,7 +1225,6 @@ Private Function BuildAlertasVBA(ByVal loMain As ListObject, _
         If Not dCuentas.exists(sCuentaKey) Then dCuentas.Add sCuentaKey, sCuenta
 
         If Not dMeta.exists(sKey) Then
-            ' Solo almacena Clase (MONEDA eliminada del output)
             Dim sCl As String: sCl = ""
             If colClase > 0 Then
                 If Not IsEmpty(data(i, colClase)) And Not IsNull(data(i, colClase)) Then
@@ -1148,10 +1261,13 @@ SkipAl:
     Next kk
 
     Dim nDocs As Long: nDocs = dSum.count
-    If nDocs = 0 Then Exit Function
+    If nDocs = 0 Then
+        mStageLog = mStageLog & vbCrLf & "(!) Alertas [" & op & "]: sin operaciones v" & Chr(225) & _
+                    "lidas en el periodo. Verifique que el MAIN contiene registros de " & _
+                    IIf(op = "DEP", "dep" & Chr(243) & "sitos", "retiros") & "."
+        Exit Function
+    End If
 
-    ' 10 columnas: TIPO_PERSONA, RUC/NIT, CUENTAS, CLASE,
-    '              SUMA, NUM_OP, PROMEDIO, ULTIMA, DESV, NIVEL
     ReDim outArr(1 To nDocs, 1 To 11) As Variant
     Dim r As Long: r = 0
     Dim sDoc2 As Variant, suma As Double, nOp As Long
@@ -1194,14 +1310,13 @@ SkipAl:
             End If
         Next ckk
 
-        ' Nuevo orden: TIPO_PERSONA, RUC/NIT, CUENTAS, CLASE, ...metricas
         outArr(r, 1) = IIf(dTipo.exists(CStr(sDoc2)), CStr(dTipo(CStr(sDoc2))), "")
-        outArr(r, 2) = "'" & CleanStr(CStr(sDoc2))    ' prefijo ' preserva ceros iniciales (DNI)
+        outArr(r, 2) = CleanStr(CStr(sDoc2))
         outArr(r, 3) = sCuentasList
         outArr(r, 4) = IIf(dMeta.exists(CStr(sDoc2)), CStr(dMeta(CStr(sDoc2))), "")
         outArr(r, 5) = Round(suma, 2)
         outArr(r, 6) = IIf(dNOpReal.exists(CStr(sDoc2)), CLng(dNOpReal(CStr(sDoc2))), nOp)
-        outArr(r, 7) = nOp    ' nOp = distinct days (buckets de dDay)
+        outArr(r, 7) = nOp
         outArr(r, 8) = Round(prom, 2)
         outArr(r, 9) = Round(ultima, 2)
         outArr(r, 10) = desv
@@ -1218,9 +1333,7 @@ SkipAl:
     Dim j As Long
     For j = 0 To 10: shAl.Cells(1, j + 1).Value = hdrs(j): Next j
 
-    ' Pre-formatear columna RUC/NIT (col 2) como texto antes de escribir
     shAl.Range(shAl.Cells(2, 2), shAl.Cells(nDocs + 1, 2)).NumberFormat = "@"
-
     shAl.Range(shAl.Cells(2, 1), shAl.Cells(nDocs + 1, 11)).Value = outArr
 
     Dim loAL As ListObject
@@ -1242,11 +1355,11 @@ SkipAl:
     End With
     On Error GoTo 0
 
-    ' AutoFit todas las columnas
     On Error Resume Next: shAl.Cells.EntireColumn.AutoFit: On Error GoTo 0
 
     Set BuildAlertasVBA = loAL
 End Function
+
 '======================
 ' Punto de entrada publico
 '======================
@@ -1259,6 +1372,15 @@ Public Sub CrearQuerySAB_MC(ByVal rutaArchivo As String, _
     mT0Total = Timer
     mStageLog = vbNullString
 
+    If Len(Trim$(rutaArchivo)) = 0 Then
+        MsgBox "Ruta del archivo origen vac" & Chr(237) & "a.", vbExclamation, "SAB MC"
+        Exit Sub
+    End If
+    If Dir(rutaArchivo, vbNormal) = "" Then
+        MsgBox "El archivo origen no existe:" & vbCrLf & rutaArchivo, vbExclamation, "SAB MC"
+        Exit Sub
+    End If
+
     If mesesSel <= 0 Then mesesSel = 6
     If Len(Trim$(opMode)) = 0 Then opMode = "AMBOS"
 
@@ -1267,7 +1389,6 @@ Public Sub CrearQuerySAB_MC(ByVal rutaArchivo As String, _
 
     SafeApp True
 
-    ' Leer tipo de cambio desde variable global cargada previamente
     Dim dTC As Object: Set dTC = gTCDict
 
     UpsertWorkbookQuery "SAB_MC_RAW", M_MC_RAW(rutaArchivo)
@@ -1286,44 +1407,35 @@ Public Sub CrearQuerySAB_MC(ByVal rutaArchivo As String, _
     Dim loRaw As ListObject: Set loRaw = EnsureTableForConnection(shRaw, "SAB_MC_RAW", connRaw)
     AppendStageLog "RAW", ElapsedSec(tStage)
 
+    If loRaw Is Nothing Then
+        SafeApp False
+        MsgBox "No se pudo cargar la tabla RAW desde el archivo." & vbCrLf & vbCrLf & _
+               "Verifique que el archivo no est" & Chr(233) & " abierto en otro programa " & _
+               "y que el formato es compatible (Excel con 10 filas de encabezado).", _
+               vbCritical, "SAB MC - Error RAW"
+        Exit Sub
+    End If
+
+    If loRaw.DataBodyRange Is Nothing Then
+        SafeApp False
+        MsgBox "La tabla RAW se carg" & Chr(243) & " pero no tiene datos." & vbCrLf & vbCrLf & _
+               "Verifique que el archivo origen contiene transacciones en la primera hoja.", _
+               vbCritical, "SAB MC - RAW vacio"
+        Exit Sub
+    End If
+
     tStage = Timer
     SAB_Progress 0.3, "Construyendo MAIN..."
     Dim loMain As ListObject: Set loMain = BuildMainVBA(loRaw, mesesSel, shMain, "SAB_MC_MAIN", dTC)
     AppendStageLog "MAIN", ElapsedSec(tStage)
 
-    ' Validar cobertura del TC vs periodo de MAIN
-    If Not dTC Is Nothing And dTC.count > 0 And Not loMain Is Nothing Then
-        Dim minDM As Date, maxDM As Date
-        If GetMinMaxDateFromLO(loMain, "Fecha", minDM, maxDM) Then
-            Dim lcMonSol As ListColumn, lcMoneda As ListColumn
-            On Error Resume Next
-            Set lcMonSol = loMain.ListColumns("Monto en Soles")
-            Set lcMoneda = loMain.ListColumns("Moneda")
-            On Error GoTo EH
-            If Not lcMonSol Is Nothing And Not lcMoneda Is Nothing Then
-                Dim sinTC As Long: sinTC = 0
-                Dim arrCheck As Variant: arrCheck = loMain.DataBodyRange.Value2
-                Dim colSolIdx As Long: colSolIdx = lcMonSol.Index
-                Dim colMonIdx As Long: colMonIdx = lcMoneda.Index
-                Dim rCheck As Long
-                For rCheck = 1 To loMain.DataBodyRange.rows.count
-                    Dim sMC As String
-                    sMC = UCase$(Trim$(CStr(arrCheck(rCheck, colMonIdx))))
-                    If sMC <> "PEN" And sMC <> "S/" And sMC <> "S/." And Len(sMC) > 0 Then
-                        Dim vMS As Variant: vMS = arrCheck(rCheck, colSolIdx)
-                        If IsEmpty(vMS) Or IsNull(vMS) Or CDbl(vMS) = 0 Then sinTC = sinTC + 1
-                    End If
-                Next rCheck
-                If sinTC > 0 Then
-                    MsgBox "Advertencia: " & sinTC & " operacion(es) en moneda extranjera no tienen " & _
-                           "tipo de cambio disponible para su fecha." & vbCrLf & vbCrLf & _
-                           "Periodo de las transacciones: " & _
-                           Format$(minDM, "dd/mm/yyyy") & " al " & Format$(maxDM, "dd/mm/yyyy") & "." & vbCrLf & _
-                           "Verifique que el archivo de tipo de cambio cubra ese periodo.", _
-                           vbExclamation, "Cobertura de Tipo de Cambio"
-                End If
-            End If
-        End If
+    If loMain Is Nothing Then
+        SafeApp False
+        Dim msgMain As String
+        msgMain = "No se pudo construir la tabla MAIN."
+        If Len(mStageLog) > 0 Then msgMain = msgMain & vbCrLf & vbCrLf & mStageLog
+        MsgBox msgMain, vbCritical, "SAB MC - Error MAIN"
+        Exit Sub
     End If
 
     ' Alertas
@@ -1337,6 +1449,9 @@ Public Sub CrearQuerySAB_MC(ByVal rutaArchivo As String, _
         ClearSheetButKeepName shAlDep
         Set loAlDep = BuildAlertasVBA(loMain, "DEP", shAlDep, "SAB_MC_ALERTAS_DEP")
         AppendStageLog "AL_DEP", ElapsedSec(tStage)
+        If loAlDep Is Nothing Then
+            mStageLog = mStageLog & vbCrLf & "(!) Alertas DEP no generadas."
+        End If
     End If
 
     If makeRet Then
@@ -1346,6 +1461,9 @@ Public Sub CrearQuerySAB_MC(ByVal rutaArchivo As String, _
         ClearSheetButKeepName shAlRet
         Set loAlRet = BuildAlertasVBA(loMain, "RET", shAlRet, "SAB_MC_ALERTAS_RET")
         AppendStageLog "AL_RET", ElapsedSec(tStage)
+        If loAlRet Is Nothing Then
+            mStageLog = mStageLog & vbCrLf & "(!) Alertas RET no generadas."
+        End If
     End If
 
     ' Sufijo de periodo
@@ -1362,7 +1480,7 @@ Public Sub CrearQuerySAB_MC(ByVal rutaArchivo As String, _
     End If
     suf = MesAbrevES(ini) & "_" & MesAbrevES(fin) & "_" & Year(fin)
 
-    ' Renombrar RAW y MAIN
+    ' Renombrar hojas
     Dim nmRaw  As String: nmRaw = SanitizeSheetName("SAB_MC_RAW_" & suf)
     Dim nmMain As String: nmMain = SanitizeSheetName("SAB_MC_" & suf)
 
@@ -1374,7 +1492,7 @@ Public Sub CrearQuerySAB_MC(ByVal rutaArchivo As String, _
     RenameSheetExact shRaw, nmRaw
     RenameSheetExact shMain, nmMain
 
-    If makeDep Then
+    If makeDep And Not loAlDep Is Nothing Then
         Dim nmAlDep As String: nmAlDep = SanitizeSheetName("SAB_MC_AL_DEP_" & suf)
         DeleteSheetIfExists ThisWorkbook, nmAlDep: FreeSheetName ThisWorkbook, nmAlDep, shAlDep
         DeleteAllTablesByName ThisWorkbook, nmAlDep
@@ -1382,7 +1500,7 @@ Public Sub CrearQuerySAB_MC(ByVal rutaArchivo As String, _
         RenameSheetExact shAlDep, nmAlDep
     End If
 
-    If makeRet Then
+    If makeRet And Not loAlRet Is Nothing Then
         Dim nmAlRet As String: nmAlRet = SanitizeSheetName("SAB_MC_AL_RET_" & suf)
         DeleteSheetIfExists ThisWorkbook, nmAlRet: FreeSheetName ThisWorkbook, nmAlRet, shAlRet
         DeleteAllTablesByName ThisWorkbook, nmAlRet
@@ -1423,12 +1541,18 @@ Public Sub CrearQuerySAB_MC(ByVal rutaArchivo As String, _
 
 EH:
     SafeApp False
-    MsgBox "Error en CrearQuerySAB_MC: " & Err.Number & " - " & Err.Description, vbCritical
+    MsgBox "Error inesperado en CrearQuerySAB_MC:" & vbCrLf & _
+           "Numero: " & Err.Number & vbCrLf & _
+           "Descripcion: " & Err.Description & vbCrLf & vbCrLf & _
+           IIf(Len(mStageLog) > 0, "Log:" & vbCrLf & mStageLog, ""), _
+           vbCritical, "SAB MC - Error"
 End Sub
 
+'======================
+' CrearHojaTipoCambio
+'======================
 Private Sub CrearHojaTipoCambio(ByRef data As Variant, ByVal nRows As Long, _
                                  ByVal nmHoja As String)
-    ' nmHoja ignorado: siempre se usa "SAB_TC" como nombre fijo
     Dim shTC As Worksheet
     Dim nmFijo As String: nmFijo = "SAB_TC"
 
@@ -1444,7 +1568,6 @@ Private Sub CrearHojaTipoCambio(ByRef data As Variant, ByVal nRows As Long, _
         shTC.Cells(1, 5).Value = "Venta"
     End If
 
-    ' Construir diccionario de claves ya existentes en la hoja: "SERIAL|COD"
     Dim dExist As Object: Set dExist = CreateObject("Scripting.Dictionary")
     Dim lastRow As Long
     lastRow = shTC.Cells(shTC.rows.count, 1).End(xlUp).Row
@@ -1467,7 +1590,6 @@ Private Sub CrearHojaTipoCambio(ByRef data As Variant, ByVal nRows As Long, _
         Next ex
     End If
 
-    ' Agregar solo filas nuevas
     Dim i As Long, r As Long: r = lastRow + 1
     For i = 2 To nRows
         Dim sCod As String: sCod = UCase$(Trim$(CStr(data(i, 2))))
@@ -1496,7 +1618,6 @@ NextRow:
         Dim newLast As Long: newLast = r - 1
         shTC.Range(shTC.Cells(2, 1), shTC.Cells(newLast, 1)).NumberFormat = "dd/mm/yyyy"
 
-        ' Actualizar o crear ListObject
         Dim lo As ListObject
         On Error Resume Next: Set lo = shTC.ListObjects(1): On Error GoTo 0
         If lo Is Nothing Then
